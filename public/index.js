@@ -1,48 +1,52 @@
 "use strict";
 const frame = document.getElementById("sj-frame");
+const errorText = document.getElementById("sj-error");
+const errorCode = document.getElementById("sj-error-code");
 const connection = new BareMux.BareMuxConnection("/baremux/worker.js");
 
 const TARGET_URL = "https://krillion.io/";
 
 const { ScramjetController } = $scramjetLoadController();
 const scramjet = new ScramjetController({
-  files: {
-    wasm: "/scram/scramjet.wasm.wasm",
-    all: "/scram/scramjet.all.js",
-    sync: "/scram/scramjet.sync.js",
-  },
+	files: {
+		wasm: "/scram/scramjet.wasm.wasm",
+		all: "/scram/scramjet.all.js",
+		sync: "/scram/scramjet.sync.js",
+	},
 });
 
-scramjet.init();
-
 async function bootKrillion() {
-  try {
-    await registerSW();
+	try {
+		await scramjet.init();
+		await registerSW();
 
-    const wispUrl =
-      (location.protocol === "https:" ? "wss" : "ws") +
-      "://" +
-      location.host +
-      "/wisp/";
+		const wispUrl =
+			(location.protocol === "https:" ? "wss" : "ws") +
+			"://" +
+			location.host +
+			"/wisp/";
 
-    // Use epoxy-transport instead of libcurl so it works on iPad (WebKit)
-    if ((await connection.getTransport()) !== "/epoxy/index.mjs") {
-      await connection.setTransport("/epoxy/index.mjs", [{ wisp: wispUrl }]);
-    }
+		if ((await connection.getTransport()) !== "/libcurl/index.mjs") {
+			await connection.setTransport("/libcurl/index.mjs", [
+				{ websocket: wispUrl },
+			]);
+		}
 
-    // Make the fullscreen game iframe visible and load Krillion directly
-    frame.style.display = "block";
-    frame.style.position = "fixed";
-    frame.style.top = "0";
-    frame.style.left = "0";
-    frame.style.width = "100vw";
-    frame.style.height = "100vh";
-    frame.style.border = "none";
+		frame.style.display = "block";
+		frame.style.position = "fixed";
+		frame.style.top = "0";
+		frame.style.left = "0";
+		frame.style.width = "100vw";
+		frame.style.height = "100vh";
+		frame.style.border = "none";
+		frame.style.zIndex = "9999";
 
-    frame.src = scramjet.encodeUrl(TARGET_URL);
-  } catch (err) {
-    console.error("Failed to initialize Scramjet:", err);
-  }
+		frame.src = scramjet.encodeUrl(TARGET_URL);
+	} catch (err) {
+		console.error("Failed to initialize Scramjet:", err);
+		if (errorText) errorText.textContent = "Error booting proxy:";
+		if (errorCode) errorCode.textContent = err.message || String(err);
+	}
 }
 
-window.addEventListener("load", bootKrillion);
+bootKrillion();
