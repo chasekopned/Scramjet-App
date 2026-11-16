@@ -19,6 +19,7 @@ async function bootKrillion() {
 	try {
 		await scramjet.init();
 		await registerSW();
+		await navigator.serviceWorker.ready;
 
 		const wispUrl =
 			(location.protocol === "https:" ? "wss" : "ws") +
@@ -26,11 +27,12 @@ async function bootKrillion() {
 			location.host +
 			"/wisp/";
 
-		if ((await connection.getTransport()) !== "/libcurl/index.mjs") {
-			await connection.setTransport("/libcurl/index.mjs", [
-				{ websocket: wispUrl },
-			]);
-		}
+		await connection.setTransport("/libcurl/index.mjs", [
+			{ websocket: wispUrl },
+		]);
+
+		// Give BareMux 500ms to finish loading libcurl WASM before booting the iframe
+		await new Promise((resolve) => setTimeout(resolve, 500));
 
 		frame.style.display = "block";
 		frame.style.position = "fixed";
