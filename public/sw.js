@@ -14,21 +14,29 @@ async function handleRequest(event) {
 
 	const reqUrl = event.request.url;
 
-	// 1. Fix Cloudflare Turnstile blob: and data: Web Workers
-	// Scramjet rewrites in-memory blob: URLs into /scramjet/blob:..., which fails if sent to the server.
-	if (reqUrl.includes("/scramjet/blob:") || reqUrl.includes("/scram/blob:")) {
-		const blobIndex = reqUrl.indexOf("blob:");
-		const rawBlobUrl = decodeURIComponent(reqUrl.slice(blobIndex).split("?")[0]);
-		return fetch(rawBlobUrl);
+	// 1. Fix 204 null-body crash when blocking ad scripts
+	if (reqUrl.includes("scripts.mediavine.com") || reqUrl.includes("googlesyndication")) {
+		return new Response(null, { status: 204 });
 	}
 
-	// 2. Optional: Silence the console JSON errors by blocking third-party ad scripts
-	if (reqUrl.includes("scripts.mediavine.com") || reqUrl.includes("googlesyndication")) {
-		return new Response("", { status: 204 });
+	// 2. Fix Cloudflare Turnstile blob: worker origin mismatch
+	if (reqUrl.includes("/scramjet/blob:") || reqUrl.includes("/scram/blob:")) {
+		try {
+			const blobIndex = reqUrl.indexOf("blob:");
+			const decodedBlob = decodeURIComponent(reqUrl.slice(blobIndex).split("?")[0]);
+			// Extract the UUID at the end of blob:https://challenges.cloudflare.com/<uuid>
+			// and map it back to the real browser memory origin (self.location.origin)
+			const uuid = decodedBlob.split("/").pop();
+			const realBlobUrl = `blob:${self.location.origin}/${uuid}`;
+			return await fetch(realBlobUrl);
+		} catch (err) {
+			// Fallback to Scramjet's internal handler if direct blob fetch fails
+			return scramjet.fetch(event);
+		}
 	}
 
 	if (scramjet.route(event)) {
-		// 3. Enforce the Krillion-only navigation lock
+		// 3. Enforce Krillion-only navigation lock
 		const isPageLoad =
 			event.request.mode === "navigate" ||
 			event.request.destination === "document" ||
