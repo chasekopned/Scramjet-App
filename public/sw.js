@@ -14,29 +14,13 @@ async function handleRequest(event) {
 
 	const reqUrl = event.request.url;
 
-	// 1. Fix 204 null-body crash when blocking ad scripts
+	// 1. Block ad scripts cleanly
 	if (reqUrl.includes("scripts.mediavine.com") || reqUrl.includes("googlesyndication")) {
 		return new Response(null, { status: 204 });
 	}
 
-	// 2. Fix Cloudflare Turnstile blob: worker origin mismatch
-	if (reqUrl.includes("/scramjet/blob:") || reqUrl.includes("/scram/blob:")) {
-		try {
-			const blobIndex = reqUrl.indexOf("blob:");
-			const decodedBlob = decodeURIComponent(reqUrl.slice(blobIndex).split("?")[0]);
-			// Extract the UUID at the end of blob:https://challenges.cloudflare.com/<uuid>
-			// and map it back to the real browser memory origin (self.location.origin)
-			const uuid = decodedBlob.split("/").pop();
-			const realBlobUrl = `blob:${self.location.origin}/${uuid}`;
-			return await fetch(realBlobUrl);
-		} catch (err) {
-			// Fallback to Scramjet's internal handler if direct blob fetch fails
-			return scramjet.fetch(event);
-		}
-	}
-
 	if (scramjet.route(event)) {
-		// 3. Enforce Krillion-only navigation lock
+		// 2. Enforce Krillion-only navigation lock
 		const isPageLoad =
 			event.request.mode === "navigate" ||
 			event.request.destination === "document" ||
@@ -54,7 +38,24 @@ async function handleRequest(event) {
 			}
 		}
 
-		return scramjet.fetch(event);
+		// 3. Intercept Turnstile scripts and fix Scramjet's "[object Object]" syntax corruption
+		const res = await scramjet.fetch(event);
+
+		if (decodeURIComponent(reqUrl).includes("challenges.cloudflare.com")) {
+			const contentType = res.headers.get("content-type") || "";
+			if (contentType.includes("javascript") || contentType.includes("html")) {
+				let text = await res.text();
+				// Fix Scramjet AST bug where an object is stringified as [object Object] inside JS
+				text = text.replace(/\[object Object\]/g, "{}");
+				return new Response(text, {
+					status: res.status,
+					statusText: res.statusText,
+					headers: res.headers
+				});
+			}
+		}
+
+		return res;
 	}
 
 	return fetch(event.request);
