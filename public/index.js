@@ -1,64 +1,48 @@
 "use strict";
-/**
- * @type {HTMLFormElement}
- */
-const form = document.getElementById("sj-form");
-/**
- * @type {HTMLInputElement}
- */
-const address = document.getElementById("sj-address");
-/**
- * @type {HTMLInputElement}
- */
-const searchEngine = document.getElementById("sj-search-engine");
-/**
- * @type {HTMLParagraphElement}
- */
-const error = document.getElementById("sj-error");
-/**
- * @type {HTMLPreElement}
- */
-const errorCode = document.getElementById("sj-error-code");
+const frame = document.getElementById("sj-frame");
+const connection = new BareMux.BareMuxConnection("/baremux/worker.js");
+
+const TARGET_URL = "https://krillion.io/";
 
 const { ScramjetController } = $scramjetLoadController();
-
 const scramjet = new ScramjetController({
-	files: {
-		wasm: "/scram/scramjet.wasm.wasm",
-		all: "/scram/scramjet.all.js",
-		sync: "/scram/scramjet.sync.js",
-	},
+  files: {
+    wasm: "/scram/scramjet.wasm.wasm",
+    all: "/scram/scramjet.all.js",
+    sync: "/scram/scramjet.sync.js",
+  },
 });
 
 scramjet.init();
 
-const connection = new BareMux.BareMuxConnection("/baremux/worker.js");
+async function bootKrillion() {
+  try {
+    await registerSW();
 
-form.addEventListener("submit", async (event) => {
-	event.preventDefault();
+    const wispUrl =
+      (location.protocol === "https:" ? "wss" : "ws") +
+      "://" +
+      location.host +
+      "/wisp/";
 
-	try {
-		await registerSW();
-	} catch (err) {
-		error.textContent = "Failed to register service worker.";
-		errorCode.textContent = err.toString();
-		throw err;
-	}
+    // Use epoxy-transport instead of libcurl so it works on iPad (WebKit)
+    if ((await connection.getTransport()) !== "/epoxy/index.mjs") {
+      await connection.setTransport("/epoxy/index.mjs", [{ wisp: wispUrl }]);
+    }
 
-	const url = search(address.value, searchEngine.value);
+    // Make the fullscreen game iframe visible and load Krillion directly
+    frame.style.display = "block";
+    frame.style.position = "fixed";
+    frame.style.top = "0";
+    frame.style.left = "0";
+    frame.style.width = "100vw";
+    frame.style.height = "100vh";
+    frame.style.border = "none";
 
-	let wispUrl =
-		(location.protocol === "https:" ? "wss" : "ws") +
-		"://" +
-		location.host +
-		"/wisp/";
-	if ((await connection.getTransport()) !== "/libcurl/index.mjs") {
-		await connection.setTransport("/libcurl/index.mjs", [
-			{ websocket: wispUrl },
-		]);
-	}
-	const frame = scramjet.createFrame();
-	frame.frame.id = "sj-frame";
-	document.body.appendChild(frame.frame);
-	frame.go(url);
-});
+    frame.src = scramjet.encodeUrl(TARGET_URL);
+  } catch (err) {
+    console.error("Failed to initialize Scramjet:", err);
+  }
+}
+
+window.addEventListener("load", bootKrillion);
