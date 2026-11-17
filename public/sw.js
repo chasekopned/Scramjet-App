@@ -38,15 +38,40 @@ async function handleRequest(event) {
 			}
 		}
 
-		// 3. Intercept Turnstile scripts and fix Scramjet's "[object Object]" syntax corruption
+// 3. Intercept Turnstile scripts and prevent String.fromCodePoint(-1) crash
 		const res = await scramjet.fetch(event);
 
 		if (decodeURIComponent(reqUrl).includes("challenges.cloudflare.com")) {
 			const contentType = res.headers.get("content-type") || "";
-			if (contentType.includes("javascript") || contentType.includes("html")) {
+			const patch = `<script>
+				const _origFCP = String.fromCodePoint;
+				String.fromCodePoint = function(...args) {
+					return _origFCP.apply(this, args.map(n => (n < 0 || n > 0x10FFFF || isNaN(n)) ? 0 : n));
+				};
+			</script>`;
+
+			if (contentType.includes("html")) {
 				let text = await res.text();
-				// Fix Scramjet AST bug where an object is stringified as [object Object] inside JS
-				text = text.replace(/\[object Object\]/g, "{}");
+				text = patch + text.replace(/\[object Object\]/g, "{}");
+				return new Response(text, {
+					status: res.status,
+					statusText: res.statusText,
+					headers: res.headers
+				});
+			}
+
+			if (contentType.includes("javascript")) {
+				let text = await res.text();
+				const jsPatch = `
+					if (typeof String.fromCodePoint === "function" && !String.fromCodePoint._patched) {
+						const _orig = String.fromCodePoint;
+						String.fromCodePoint = function(...a) {
+							return _orig.apply(this, a.map(n => (n < 0 || n > 0x10FFFF || isNaN(n)) ? 0 : n));
+						};
+						String.fromCodePoint._patched = true;
+					}
+				`;
+				text = jsPatch + text.replace(/\[object Object\]/g, "{}");
 				return new Response(text, {
 					status: res.status,
 					statusText: res.statusText,
